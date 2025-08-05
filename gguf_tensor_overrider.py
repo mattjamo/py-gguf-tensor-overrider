@@ -185,7 +185,7 @@ def get_ram_bytes() -> int:
 
 def parse_gguf_header(data: bytes) -> GGUFParseOutput:
     """Parse GGUF file header to extract metadata and tensor information"""
-    if len(data) < 16:
+    if len(data) < 24:
         raise ValueError("Invalid GGUF file: too short")
     
     # Read magic number and version
@@ -194,7 +194,7 @@ def parse_gguf_header(data: bytes) -> GGUFParseOutput:
         raise ValueError("Invalid GGUF file: wrong magic number")
     
     version = struct.unpack('<I', data[4:8])[0]
-    if version != 3:
+    if version not in [2, 3]:
         raise ValueError(f"Unsupported GGUF version: {version}")
     
     # Read tensor count and metadata KV count
@@ -205,100 +205,196 @@ def parse_gguf_header(data: bytes) -> GGUFParseOutput:
     metadata = {}
     
     # Parse metadata key-value pairs
-    for _ in range(metadata_kv_count):
-        # Read key length and key
-        key_len = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        key = data[offset:offset+key_len].decode('utf-8')
-        offset += key_len
-        
-        # Read value type
-        value_type = struct.unpack('<I', data[offset:offset+4])[0]
-        offset += 4
-        
-        # Parse value based on type
-        if value_type == 4:  # String
-            value_len = struct.unpack('<Q', data[offset:offset+8])[0]
+    for i in range(metadata_kv_count):
+        try:
+            if offset + 8 > len(data):
+                Log.warn(f"Reached end of data while parsing metadata entry {i}")
+                break
+            
+            # Read key length and key
+            key_len = struct.unpack('<Q', data[offset:offset+8])[0]
             offset += 8
-            value = data[offset:offset+value_len].decode('utf-8')
-            offset += value_len
-        elif value_type == 6:  # Bool
-            value = struct.unpack('<?', data[offset:offset+1])[0]
-            offset += 1
-        elif value_type == 7:  # Int8
-            value = struct.unpack('<b', data[offset:offset+1])[0]
-            offset += 1
-        elif value_type == 8:  # UInt8
-            value = struct.unpack('<B', data[offset:offset+1])[0]
-            offset += 1
-        elif value_type == 9:  # Int16
-            value = struct.unpack('<h', data[offset:offset+2])[0]
-            offset += 2
-        elif value_type == 10:  # UInt16
-            value = struct.unpack('<H', data[offset:offset+2])[0]
-            offset += 2
-        elif value_type == 11:  # Int32
-            value = struct.unpack('<i', data[offset:offset+4])[0]
+            
+            if offset + key_len > len(data):
+                Log.warn(f"Not enough data for key of length {key_len}")
+                break
+            
+            try:
+                key = data[offset:offset+key_len].decode('utf-8', errors='replace')
+            except UnicodeDecodeError:
+                key = f"unknown_key_{i}"
+                Log.warn(f"Failed to decode key at offset {offset}, using placeholder")
+            
+            offset += key_len
+            
+            if offset + 4 > len(data):
+                Log.warn(f"Not enough data for value type of key {key}")
+                break
+            
+            # Read value type
+            value_type = struct.unpack('<I', data[offset:offset+4])[0]
             offset += 4
-        elif value_type == 12:  # UInt32
-            value = struct.unpack('<I', data[offset:offset+4])[0]
-            offset += 4
-        elif value_type == 13:  # Float32
-            value = struct.unpack('<f', data[offset:offset+4])[0]
-            offset += 4
-        elif value_type == 14:  # Int64
-            value = struct.unpack('<q', data[offset:offset+8])[0]
-            offset += 8
-        elif value_type == 15:  # UInt64
-            value = struct.unpack('<Q', data[offset:offset+8])[0]
-            offset += 8
-        elif value_type == 16:  # Float64
-            value = struct.unpack('<d', data[offset:offset+8])[0]
-            offset += 8
-        else:
-            # Skip unknown types
-            Log.warn(f"Unknown metadata type {value_type} for key {key}")
-            value = None
+            
+            # Parse value based on type
+            if value_type == 4:  # String
+                if offset + 8 > len(data):
+                    Log.warn(f"Not enough data for string length of key {key}")
+                    break
+                value_len = struct.unpack('<Q', data[offset:offset+8])[0]
+                offset += 8
+                if offset + value_len > len(data):
+                    Log.warn(f"Not enough data for string value of key {key}")
+                    break
+                try:
+                    value = data[offset:offset+value_len].decode('utf-8', errors='replace')
+                except UnicodeDecodeError:
+                    value = "unknown_string"
+                    Log.warn(f"Failed to decode string value for key {key}")
+                offset += value_len
+            elif value_type == 6:  # Bool
+                if offset + 1 > len(data):
+                    break
+                value = struct.unpack('<?', data[offset:offset+1])[0]
+                offset += 1
+            elif value_type == 7:  # Int8
+                if offset + 1 > len(data):
+                    break
+                value = struct.unpack('<b', data[offset:offset+1])[0]
+                offset += 1
+            elif value_type == 8:  # UInt8
+                if offset + 1 > len(data):
+                    break
+                value = struct.unpack('<B', data[offset:offset+1])[0]
+                offset += 1
+            elif value_type == 9:  # Int16
+                if offset + 2 > len(data):
+                    break
+                value = struct.unpack('<h', data[offset:offset+2])[0]
+                offset += 2
+            elif value_type == 10:  # UInt16
+                if offset + 2 > len(data):
+                    break
+                value = struct.unpack('<H', data[offset:offset+2])[0]
+                offset += 2
+            elif value_type == 11:  # Int32
+                if offset + 4 > len(data):
+                    break
+                value = struct.unpack('<i', data[offset:offset+4])[0]
+                offset += 4
+            elif value_type == 12:  # UInt32
+                if offset + 4 > len(data):
+                    break
+                value = struct.unpack('<I', data[offset:offset+4])[0]
+                offset += 4
+            elif value_type == 13:  # Float32
+                if offset + 4 > len(data):
+                    break
+                value = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            elif value_type == 14:  # Int64
+                if offset + 8 > len(data):
+                    break
+                value = struct.unpack('<q', data[offset:offset+8])[0]
+                offset += 8
+            elif value_type == 15:  # UInt64
+                if offset + 8 > len(data):
+                    break
+                value = struct.unpack('<Q', data[offset:offset+8])[0]
+                offset += 8
+            elif value_type == 16:  # Float64
+                if offset + 8 > len(data):
+                    break
+                value = struct.unpack('<d', data[offset:offset+8])[0]
+                offset += 8
+            else:
+                # Skip unknown types by reading next entry
+                Log.warn(f"Unknown metadata type {value_type} for key {key}, skipping")
+                value = None
+            
+            if value is not None:
+                metadata[key] = value
         
-        metadata[key] = value
+        except (struct.error, UnicodeDecodeError) as e:
+            Log.warn(f"Error parsing metadata entry {i}: {e}")
+            break
     
     # Parse tensor information
     tensor_infos = []
-    for _ in range(tensor_count):
-        # Read tensor name
-        name_len = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        name = data[offset:offset+name_len].decode('utf-8')
-        offset += name_len
-        
-        # Read dimensions
-        n_dims = struct.unpack('<I', data[offset:offset+4])[0]
-        offset += 4
-        shape = []
-        for _ in range(n_dims):
-            dim = struct.unpack('<Q', data[offset:offset+8])[0]
-            shape.append(dim)
-            offset += 8
-        
-        # Read data type
-        dtype_val = struct.unpack('<I', data[offset:offset+4])[0]
-        offset += 4
+    for i in range(tensor_count):
         try:
-            dtype = GGMLQuantizationType(dtype_val)
-        except ValueError:
-            Log.warn(f"Unknown quantization type {dtype_val} for tensor {name}")
-            dtype = GGMLQuantizationType.F32  # Default fallback
+            if offset + 8 > len(data):
+                Log.warn(f"Not enough data for tensor {i} name length")
+                break
+            
+            # Read tensor name
+            name_len = struct.unpack('<Q', data[offset:offset+8])[0]
+            offset += 8
+            
+            if offset + name_len > len(data):
+                Log.warn(f"Not enough data for tensor {i} name")
+                break
+            
+            try:
+                name = data[offset:offset+name_len].decode('utf-8', errors='replace')
+            except UnicodeDecodeError:
+                name = f"unknown_tensor_{i}"
+                Log.warn(f"Failed to decode tensor name at offset {offset}")
+            
+            offset += name_len
+            
+            if offset + 4 > len(data):
+                Log.warn(f"Not enough data for tensor {name} dimensions count")
+                break
+            
+            # Read dimensions
+            n_dims = struct.unpack('<I', data[offset:offset+4])[0]
+            offset += 4
+            
+            shape = []
+            for j in range(n_dims):
+                if offset + 8 > len(data):
+                    Log.warn(f"Not enough data for tensor {name} dimension {j}")
+                    break
+                dim = struct.unpack('<Q', data[offset:offset+8])[0]
+                shape.append(dim)
+                offset += 8
+            
+            if len(shape) != n_dims:
+                Log.warn(f"Incomplete shape for tensor {name}")
+                continue
+            
+            if offset + 4 > len(data):
+                Log.warn(f"Not enough data for tensor {name} data type")
+                break
+            
+            # Read data type
+            dtype_val = struct.unpack('<I', data[offset:offset+4])[0]
+            offset += 4
+            
+            try:
+                dtype = GGMLQuantizationType(dtype_val)
+            except ValueError:
+                Log.warn(f"Unknown quantization type {dtype_val} for tensor {name}")
+                dtype = GGMLQuantizationType.F32  # Default fallback
+            
+            if offset + 8 > len(data):
+                Log.warn(f"Not enough data for tensor {name} offset")
+                break
+            
+            # Read tensor data offset
+            tensor_offset = struct.unpack('<Q', data[offset:offset+8])[0]
+            offset += 8
+            
+            tensor_infos.append(TensorInfo(
+                name=name,
+                shape=shape,
+                dtype=dtype,
+                offset=tensor_offset
+            ))
         
-        # Read tensor data offset
-        tensor_offset = struct.unpack('<Q', data[offset:offset+8])[0]
-        offset += 8
-        
-        tensor_infos.append(TensorInfo(
-            name=name,
-            shape=shape,
-            dtype=dtype,
-            offset=tensor_offset
-        ))
+        except (struct.error, UnicodeDecodeError) as e:
+            Log.warn(f"Error parsing tensor {i}: {e}")
+            break
     
     return GGUFParseOutput(metadata=metadata, tensor_infos=tensor_infos)
 
@@ -314,12 +410,18 @@ def download_gguf(url: str) -> GGUFParseOutput:
         response = requests.get(url, stream=True)
         response.raise_for_status()
         
-        # Read header (first 8KB should be enough for metadata)
+        # Read header (first 1MB should be enough for metadata)
         header_data = b''
-        for chunk in response.iter_content(chunk_size=8192):
+        chunk_size = 8192
+        max_header_size = 1024 * 1024  # 1MB
+        
+        for chunk in response.iter_content(chunk_size=chunk_size):
             header_data += chunk
-            if len(header_data) >= 8192:
+            if len(header_data) >= max_header_size:
                 break
+        
+        if len(header_data) < 24:
+            raise ValueError("Downloaded data too small to be a valid GGUF file")
         
         return parse_gguf_header(header_data)
     
@@ -334,26 +436,41 @@ def download_gguf(url: str) -> GGUFParseOutput:
         part_url = f"{base_url}-{i:05d}-of-{total_parts:05d}.gguf"
         Log.log(LogLevel.INFO, f"Downloading part {i} of {total_parts} from {part_url}")
         
-        response = requests.get(part_url, stream=True)
-        response.raise_for_status()
+        try:
+            response = requests.get(part_url, stream=True, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            Log.error(f"Failed to download {part_url}: {e}")
+            raise
         
-        # Read header
+        # Read header (first 1MB should be enough for metadata)
         header_data = b''
-        for chunk in response.iter_content(chunk_size=8192):
+        chunk_size = 8192
+        max_header_size = 1024 * 1024  # 1MB
+        
+        for chunk in response.iter_content(chunk_size=chunk_size):
             header_data += chunk
-            if len(header_data) >= 8192:
+            if len(header_data) >= max_header_size:
                 break
         
-        part = parse_gguf_header(header_data)
+        if len(header_data) < 24:
+            Log.warn(f"Part {i} data too small, skipping")
+            continue
         
-        if first_part is None:
-            first_part = part
-            all_tensors = part.tensor_infos.copy()
-        else:
-            all_tensors.extend(part.tensor_infos)
+        try:
+            part = parse_gguf_header(header_data)
+            
+            if first_part is None:
+                first_part = part
+                all_tensors = part.tensor_infos.copy()
+            else:
+                all_tensors.extend(part.tensor_infos)
+        except Exception as e:
+            Log.warn(f"Failed to parse part {i}: {e}")
+            continue
     
     if first_part is None:
-        raise ValueError("Failed to download any parts of the GGUF file")
+        raise ValueError("Failed to download and parse any parts of the GGUF file")
     
     first_part.tensor_infos = all_tensors
     return first_part
@@ -846,4 +963,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-            

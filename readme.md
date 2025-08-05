@@ -127,5 +127,5 @@ This Python version maintains feature parity with the original Node.js version b
 
 ## License
 
-This project maintains the same license as the original repository. The k-koehler license is as follows:
+This project has a slightly modified license from the original repository. This repo adopts Apache 2.0 with k-koehler license appended which is as follows:
 Go wild. The code in this repository is free, open source, modifiable, distributable, whatever-the-fuck-you-wantable.
