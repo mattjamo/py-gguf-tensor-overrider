@@ -86,7 +86,7 @@ echo.
 echo You can now use 'gguf-tensor-overrider' from any command prompt.
 echo.
 echo Example usage:
-echo   python gguf-tensor-overrider -g "https://huggingface.co/unsloth/Qwen3-235B-A22B-GGUF/resolve/main/UD-Q4_K_XL/Qwen3-235B-A22B-UD-Q4_K_XL-00001-of-00003.gguf" -c 32000
+echo   gguf-tensor-overrider -g "https://huggingface.co/unsloth/Qwen3-235B-A22B-GGUF/resolve/main/UD-Q4_K_XL/Qwen3-235B-A22B-UD-Q4_K_XL-00001-of-00003.gguf" -c 32000
 echo.
 echo Note: Make sure NVIDIA drivers and nvidia-smi are properly installed.
 echo ====================================================
